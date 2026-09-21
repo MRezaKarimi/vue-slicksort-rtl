@@ -12731,9 +12731,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vue-slicksort@workspace:.":
+"vue-slicksort-rtl@workspace:.":
   version: 0.0.0-use.local
-  resolution: "vue-slicksort@workspace:."
+  resolution: "vue-slicksort-rtl@workspace:."
   dependencies:
     "@babel/core": "npm:^7.13.14"
     "@babel/plugin-external-helpers": "npm:^7.12.13"
