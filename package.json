@@ -107,6 +107,5 @@
   "files": [
     "index.d.ts",
     "dist/*"
-  ],
-  "dependencies": {}
+  ]
 }

@@ -95,6 +95,11 @@ interface ComponentData extends ComponentProps {
   // Data structure for `axis` prop
   _axis: { x: boolean; y: boolean };
 
+  // Whether the container lays its items out right-to-left.
+  // Horizontal offsets are measured from the left in every direction, so this
+  // is what tells the sorting math that index order runs the other way.
+  isRTL: boolean;
+
   // timer for press threshold
   pressTimer: Timer;
 
@@ -490,9 +495,10 @@ export const ContainerMixin = defineComponent({
         this.autoscrollInterval = null;
       }
       if (this.hub!.isSource(this as ContainerRef)) {
-        // Trick to animate all nodes up
+        // Trick to animate all nodes up: shove the helper past the end of the
+        // list, which in an RTL container is far to the left rather than right
         this.translate = {
-          x: 10000,
+          x: this.isRTL ? -10000 : 10000,
           y: 10000,
         };
         this.animateNodes();
@@ -537,6 +543,8 @@ export const ContainerMixin = defineComponent({
         x: this.axis.indexOf('x') >= 0,
         y: this.axis.indexOf('y') >= 0,
       };
+
+      this.isRTL = this._window.getComputedStyle(this.container).direction === 'rtl';
 
       this.initialOffset = getPointerOffset(e);
 
@@ -805,14 +813,31 @@ export const ContainerMixin = defineComponent({
         left: this.scrollContainer.scrollLeft - this.initialScroll.left,
         top: this.scrollContainer.scrollTop - this.initialScroll.top,
       };
+      // Every horizontal measurement below (offsetLeft, scroll deltas, bounding
+      // rects) grows to the right, but in an RTL container the list grows to the
+      // left, so item index order runs against them. Mirroring the x axis puts
+      // index order and coordinate order back in agreement, which lets the rest
+      // of this method stay written as if the list were always LTR.
+      // `inlineStart` maps a left edge to the mirrored leading edge (the right
+      // edge in RTL); `flipX` mirrors a plain horizontal distance.
+      const flipX = this.isRTL ? -1 : 1;
+      const inlineStart = (left: number, elemWidth: number) => (this.isRTL ? -(left + elemWidth) : left);
       const sortingOffset = {
-        left: this.offsetEdge.left + this.translate.x + deltaScroll.left,
+        left: inlineStart(this.offsetEdge.left + this.translate.x + deltaScroll.left, this.width),
         top: this.offsetEdge.top + this.translate.y + deltaScroll.top,
       };
       const scrollDifference = {
         top: window.pageYOffset - this.initialWindowScroll.top,
-        left: window.pageXOffset - this.initialWindowScroll.left,
+        left: flipX * (window.pageXOffset - this.initialWindowScroll.left),
       };
+      // The row bounds a node may not cross before it wraps onto the adjacent
+      // row. `edgeOffset` is measured from the container's *offsetParent*, so
+      // the container's own offset is part of the bound, and both bounds get
+      // the same mirroring as the offsets they are compared against.
+      const containerLeft = this.container.offsetLeft;
+      const containerRight = containerLeft + this.containerBoundingRect.width;
+      const rowStartBound = this.isRTL ? -containerRight : containerLeft;
+      const rowEndBound = this.isRTL ? -containerLeft : containerRight;
       this.newIndex = null;
 
       for (let i = 0, len = nodes.length; i < len; i++) {
@@ -867,19 +892,21 @@ export const ContainerMixin = defineComponent({
         }
 
         if (this._axis.x) {
+          // Leading edge of this node, mirrored to match index order in RTL
+          const nodeStart = inlineStart(edgeOffset.left, width);
           if (this._axis.y) {
             // Calculations for a grid setup
             if (
               index < this.index! &&
-              ((sortingOffset.left + scrollDifference.left - offset.width <= edgeOffset.left &&
+              ((sortingOffset.left + scrollDifference.left - offset.width <= nodeStart &&
                 sortingOffset.top + scrollDifference.top <= edgeOffset.top + offset.height) ||
                 sortingOffset.top + scrollDifference.top + offset.height <= edgeOffset.top)
             ) {
-              // If the current node is to the left on the same row, or above the node that's being dragged
-              // then move it to the right
-              translate.x = this.width + this.marginOffset.x;
-              if (edgeOffset.left + translate.x > this.containerBoundingRect.width - offset.width && nextNode) {
-                // If it moves passed the right bounds, then animate it to the first position of the next row.
+              // If the current node is earlier on the same row, or above the node that's being dragged
+              // then move it one slot towards the end of the row
+              translate.x = flipX * (this.width + this.marginOffset.x);
+              if (inlineStart(edgeOffset.left + translate.x, width) > rowEndBound - offset.width && nextNode) {
+                // If it moves passed the end bounds, then animate it to the first position of the next row.
                 // We just use the offset of the next node to calculate where to move, because that node's original position
                 // is exactly where we want to go
                 translate.x = nextNode.edgeOffset!.left - edgeOffset.left;
@@ -890,15 +917,15 @@ export const ContainerMixin = defineComponent({
               }
             } else if (
               index > this.index! &&
-              ((sortingOffset.left + scrollDifference.left + offset.width >= edgeOffset.left &&
+              ((sortingOffset.left + scrollDifference.left + offset.width >= nodeStart &&
                 sortingOffset.top + scrollDifference.top + offset.height >= edgeOffset.top) ||
                 sortingOffset.top + scrollDifference.top + offset.height >= edgeOffset.top + height)
             ) {
-              // If the current node is to the right on the same row, or below the node that's being dragged
-              // then move it to the left
-              translate.x = -(this.width + this.marginOffset.x);
-              if (edgeOffset.left + translate.x < this.containerBoundingRect.left + offset.width && prevNode) {
-                // If it moves passed the left bounds, then animate it to the last position of the previous row.
+              // If the current node is later on the same row, or below the node that's being dragged
+              // then move it one slot towards the start of the row
+              translate.x = -flipX * (this.width + this.marginOffset.x);
+              if (inlineStart(edgeOffset.left + translate.x, width) < rowStartBound + offset.width && prevNode) {
+                // If it moves passed the start bounds, then animate it to the last position of the previous row.
                 // We just use the offset of the previous node to calculate where to move, because that node's original position
                 // is exactly where we want to go
                 translate.x = prevNode.edgeOffset!.left - edgeOffset.left;
@@ -907,14 +934,11 @@ export const ContainerMixin = defineComponent({
               this.newIndex = index;
             }
           } else {
-            if (index > this.index! && sortingOffset.left + scrollDifference.left + offset.width >= edgeOffset.left) {
-              translate.x = -(this.width + this.marginOffset.x);
+            if (index > this.index! && sortingOffset.left + scrollDifference.left + offset.width >= nodeStart) {
+              translate.x = -flipX * (this.width + this.marginOffset.x);
               this.newIndex = index;
-            } else if (
-              index < this.index! &&
-              sortingOffset.left + scrollDifference.left <= edgeOffset.left + offset.width
-            ) {
-              translate.x = this.width + this.marginOffset.x;
+            } else if (index < this.index! && sortingOffset.left + scrollDifference.left <= nodeStart + offset.width) {
+              translate.x = flipX * (this.width + this.marginOffset.x);
               if (this.newIndex == null) {
                 this.newIndex = index;
               }
