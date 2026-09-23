@@ -1,6 +1,6 @@
 {
   "name": "vue-slicksort-rtl",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Set of mixins to turn any list into a sortable, touch-friendly, animated list",
   "author": {
     "name": "M.R. Karimi"
@@ -9,6 +9,7 @@
   "homepage": "https://vue-slicksort.netlify.app",
   "main": "dist/vue-slicksort.cjs.js",
   "module": "dist/vue-slicksort.esm.js",
+  "types": "index.d.ts",
   "browser": "dist/vue-slicksort.umd.js",
   "unpkg": "dist/vue-slicksort.min.js",
   "license": "MIT",
